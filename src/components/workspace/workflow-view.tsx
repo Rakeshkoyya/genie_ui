@@ -34,6 +34,11 @@ const AVAILABLE_MODELS: ModelOption[] = [
   { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
   { id: "openai/gpt-4o-mini", label: "GPT-4o Mini" },
   { id: "openai/gpt-4.1-mini", label: "GPT-4.1-mini" },
+  { id: "openai/gpt-5", label: "GPT-5" },
+  { id: "openai/gpt-5.1", label: "GPT-5.1" },
+  { id: "openai/gpt-5.2", label: "GPT-5.2" },
+  { id: "openai/gpt-5.4-mini", label: "GPT-5.4-mini" },
+  { id: "openai/gpt-5.4", label: "GPT-5.4 (costly)" },
 ];
 
 const TYPE_ICONS: Record<string, React.ElementType> = {

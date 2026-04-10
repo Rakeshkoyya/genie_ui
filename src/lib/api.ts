@@ -368,8 +368,6 @@ export interface GenerateRequest {
   model?: string;
   title?: string;
   chain_id?: string;
-  grade?: string;
-  subject?: string;
 }
 
 export interface GenerateResponse {
@@ -393,15 +391,14 @@ export async function generate(data: GenerateRequest): Promise<GenerateResponse>
 
 // Chain generation with SSE progress streaming
 export interface ChainStreamEvent {
-  event: "planning" | "step_start" | "step_complete" | "done" | "error";
+  event: "phase" | "done" | "error";
   data: {
-    step?: number;
-    total_steps?: number;
-    step_name?: string;
+    phase?: "planning" | "generating" | "processing";
     content?: string;
     generation_id?: string;
     message?: string;
-    status?: string;
+    total_sections?: number;
+    section_names?: string[];
   };
 }
 
@@ -420,8 +417,6 @@ export async function generateChainStream(
       model: data.model || "anthropic/claude-3.5-sonnet",
       title: data.title,
       chain_id: data.chain_id,
-      grade: data.grade,
-      subject: data.subject,
     }),
   });
 

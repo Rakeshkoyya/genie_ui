@@ -24,6 +24,9 @@ import {
   Code,
   ChevronRight,
   File,
+  Brain,
+  Sparkles,
+  Cog,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { ModelOption, Generation } from "@/lib/types";
@@ -81,19 +84,17 @@ export function GenerateView() {
 
   // Step 3: Generate
   const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id);
-  const [grade, setGrade] = useState("");
-  const [subject, setSubject] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [generatedContent, setGeneratedContent] = useState("");
   const [currentGenerationId, setCurrentGenerationId] = useState<string | null>(null);
 
-  // Chain progress
-  const [chainProgress, setChainProgress] = useState<{
-    currentStep: number;
-    totalSteps: number;
-    stepName: string;
-    completedSteps: { name: string; content: string }[];
+  // Chain progress — 3-phase display
+  const [generationPhase, setGenerationPhase] = useState<{
+    phase: "planning" | "generating" | "processing";
+    message: string;
+    totalSections: number;
+    sectionNames: string[];
   } | null>(null);
 
   // UI
@@ -125,15 +126,11 @@ export function GenerateView() {
     setIsRunning(true);
     setGeneratedContent("");
     setCurrentGenerationId(null);
-    setChainProgress(null);
+    setGenerationPhase(null);
 
-    try {
-      const prompt = allPrompts.find((p) => p.id === selectedPromptId);
-
-      // Chain mode: use SSE streaming
-      if (promptMode === "chain" && selectedChainId) {
-        setChainProgress({ currentStep: 0, totalSteps: 0, stepName: "Starting...", completedSteps: [] });
-
+    // Chain mode — use streaming with 3-phase progress
+    if (promptMode === "chain" && selectedChainId) {
+      try {
         await api.generateChainStream(
           {
             source_ids: selectedSourceIds,
@@ -141,42 +138,21 @@ export function GenerateView() {
             model: selectedModel,
             title: sessionTitle,
             chain_id: selectedChainId,
-            grade: grade || undefined,
-            subject: subject || undefined,
           },
           (event) => {
             switch (event.event) {
-              case "planning":
-                setChainProgress((prev) => ({
-                  currentStep: 0,
-                  totalSteps: prev?.totalSteps || 0,
-                  stepName: event.data.message || "Analyzing chapter & planning workbook...",
-                  completedSteps: prev?.completedSteps || [],
-                }));
-                break;
-              case "step_start":
-                setChainProgress((prev) => ({
-                  currentStep: event.data.step || 0,
-                  totalSteps: event.data.total_steps || 0,
-                  stepName: event.data.step_name || "",
-                  completedSteps: prev?.completedSteps || [],
-                }));
-                break;
-              case "step_complete":
-                setChainProgress((prev) => ({
-                  currentStep: event.data.step || 0,
-                  totalSteps: event.data.total_steps || 0,
-                  stepName: event.data.step_name || "",
-                  completedSteps: [
-                    ...(prev?.completedSteps || []),
-                    { name: event.data.step_name || "", content: event.data.content || "" },
-                  ],
-                }));
+              case "phase":
+                setGenerationPhase({
+                  phase: event.data.phase || "planning",
+                  message: event.data.message || "",
+                  totalSections: event.data.total_sections || 0,
+                  sectionNames: event.data.section_names || [],
+                });
                 break;
               case "done":
                 setGeneratedContent(event.data.content || "");
                 setCurrentGenerationId(event.data.generation_id || null);
-                setChainProgress(null);
+                setGenerationPhase(null);
                 toast.success("Content generated!");
                 if (event.data.generation_id) {
                   addGeneration({
@@ -196,17 +172,23 @@ export function GenerateView() {
                 break;
               case "error":
                 toast.error(event.data.message || "Chain generation failed");
-                setChainProgress(null);
+                setGenerationPhase(null);
                 break;
             }
           },
         );
-
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Generation failed");
+      } finally {
         setIsRunning(false);
-        return;
       }
+      return;
+    }
 
-      // Single prompt mode
+    // Single prompt mode
+    try {
+      const prompt = allPrompts.find((p) => p.id === selectedPromptId);
+
       if (!prompt) {
         toast.error("Please select a prompt template");
         setIsRunning(false);
@@ -225,7 +207,6 @@ export function GenerateView() {
       setCurrentGenerationId(data.generation_id);
       toast.success("Content generated!");
       
-      // Add to generations in context
       if (data.generation_id) {
         addGeneration({
           id: data.generation_id,
@@ -377,7 +358,7 @@ export function GenerateView() {
       // Join indent that spans two lines: <indent>content\n  </indent>
       let out = raw.replace(/<indent>([^\n]*?)\s*\n\s*<\/indent>/g, "<indent>$1</indent>");
       const blockTag =
-        /(?:<title>.*?<\/title>)|(?:<heading>.*?<\/heading>)|(?:<subheading>.*?<\/subheading>)|(?:<instruction>.*?<\/instruction>)|(?:<indent>.*?<\/indent>)|(?:<hr\s*\/>)|(?:<pagebreak\s*\/>)|(?:<blank\s*\/>)|(?:<space\s+lines="\d+"\s*\/>)/g;
+        /(?:<title>.*?<\/title>)|(?:<heading>.*?<\/heading>)|(?:<subheading>.*?<\/subheading>)|(?:<instruction>.*?<\/instruction>)|(?:<indent>.*?<\/indent>)|(?:<hr\s*\/>)|(?:<pagebreak\s*\/>)|(?:<space\s+lines="\d+"\s*\/>)/g;
       const newLines: string[] = [];
       for (const line of out.split("\n")) {
         const parts = line.trim().split(new RegExp(`(${blockTag.source})`, "g"));
@@ -563,7 +544,7 @@ export function GenerateView() {
       if (trimmed === "<blank/>" || trimmed === "<blank />" || /^_{3,}$/.test(trimmed)) {
         elements.push(
           <p key={i} className="my-1 tracking-widest text-muted-foreground">
-            {"_".repeat(40)}
+            {"_".repeat(8)}
           </p>
         );
         i++;
@@ -690,7 +671,7 @@ export function GenerateView() {
       if (labelXml) return <strong key={i} className="mr-1">{labelXml[1]}</strong>;
 
       if (part.trim() === "<blank/>" || part.trim() === "<blank />" || /^_{3,}$/.test(part.trim()))
-        return <span key={i} className="tracking-widest text-muted-foreground">{"_".repeat(30)}</span>;
+        return <span key={i} className="tracking-widest text-muted-foreground">{"_".repeat(8)}</span>;
 
       const boldMd = part.match(/^\*\*([\s\S]*?)\*\*$/);
       if (boldMd) return <strong key={i}>{boldMd[1]}</strong>;
@@ -724,32 +705,6 @@ export function GenerateView() {
                   ))}
                 </select>
                 <ChevronDown className="h-3 w-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground" />
-              </div>
-            </div>
-
-            {/* Grade & Subject (optional hints for master planner) */}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Grade / Class</label>
-                <input
-                  type="text"
-                  value={grade}
-                  onChange={(e) => setGrade(e.target.value)}
-                  disabled={isRunning}
-                  placeholder="e.g. Class 4"
-                  className="w-full h-8 px-2 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Subject</label>
-                <input
-                  type="text"
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  disabled={isRunning}
-                  placeholder="e.g. Science"
-                  className="w-full h-8 px-2 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                />
               </div>
             </div>
           </div>
@@ -1089,71 +1044,145 @@ export function GenerateView() {
 
       {/* Right: Results */}
       <div className="flex-1 overflow-y-auto">
-        {/* Chain progress overlay */}
-        {isRunning && chainProgress ? (
+        {/* 3-phase progress display */}
+        {isRunning && generationPhase ? (
           <div className="h-full flex items-center justify-center">
-            <div className="max-w-lg w-full mx-auto p-8 space-y-6">
-              {/* Header */}
+            <div className="max-w-lg w-full mx-auto p-8 space-y-8">
+              {/* Title */}
               <div className="text-center space-y-1">
                 <h2 className="text-lg font-semibold">{sessionTitle}</h2>
                 <p className="text-sm text-muted-foreground">
-                  Running prompt chain&hellip;
+                  Generating workbook with {generationPhase.totalSections} sections
                 </p>
               </div>
 
-              {/* Overall progress bar */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">Overall Progress</span>
-                  <span className="text-muted-foreground">
-                    {chainProgress.completedSteps.length} / {chainProgress.totalSteps} steps
-                  </span>
+              {/* Phase steps */}
+              <div className="space-y-4">
+                {/* Phase 1: Planning */}
+                <div className={`flex items-start gap-4 p-4 rounded-xl border transition-all duration-500 ${
+                  generationPhase.phase === "planning"
+                    ? "bg-primary/5 border-primary/30 shadow-sm"
+                    : generationPhase.phase === "generating" || generationPhase.phase === "processing"
+                    ? "bg-muted/30 border-border opacity-60"
+                    : "bg-muted/20 border-border opacity-40"
+                }`}>
+                  <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-500 ${
+                    generationPhase.phase === "planning"
+                      ? "bg-primary/15 text-primary"
+                      : "bg-green-500/15 text-green-600 dark:text-green-400"
+                  }`}>
+                    {generationPhase.phase === "planning" ? (
+                      <Brain className="h-5 w-5 animate-pulse" />
+                    ) : (
+                      <Check className="h-5 w-5" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">Planning Workbook</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {generationPhase.phase === "planning"
+                        ? "Analysing content, detecting grade level, expanding formats..."
+                        : "Plan complete"}
+                    </p>
+                    {generationPhase.phase === "planning" && (
+                      <div className="mt-2 h-1 bg-muted rounded-full overflow-hidden">
+                        <div className="h-full bg-primary/60 rounded-full animate-pulse" style={{ width: "60%" }} />
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="h-2.5 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
-                    style={{
-                      width: `${chainProgress.totalSteps > 0 ? Math.round((chainProgress.completedSteps.length / chainProgress.totalSteps) * 100) : 0}%`,
-                    }}
-                  />
+
+                {/* Phase 2: Generating */}
+                <div className={`flex items-start gap-4 p-4 rounded-xl border transition-all duration-500 ${
+                  generationPhase.phase === "generating"
+                    ? "bg-primary/5 border-primary/30 shadow-sm"
+                    : generationPhase.phase === "processing"
+                    ? "bg-muted/30 border-border opacity-60"
+                    : "bg-muted/20 border-border opacity-40"
+                }`}>
+                  <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-500 ${
+                    generationPhase.phase === "generating"
+                      ? "bg-primary/15 text-primary"
+                      : generationPhase.phase === "processing"
+                      ? "bg-green-500/15 text-green-600 dark:text-green-400"
+                      : "bg-muted text-muted-foreground"
+                  }`}>
+                    {generationPhase.phase === "generating" ? (
+                      <Sparkles className="h-5 w-5 animate-pulse" />
+                    ) : generationPhase.phase === "processing" ? (
+                      <Check className="h-5 w-5" />
+                    ) : (
+                      <Sparkles className="h-5 w-5" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">Generating Content</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {generationPhase.phase === "generating"
+                        ? `Creating all ${generationPhase.totalSections} sections in one shot...`
+                        : generationPhase.phase === "processing"
+                        ? "Content generated"
+                        : "Waiting..."}
+                    </p>
+                    {generationPhase.phase === "generating" && (
+                      <>
+                        <div className="mt-2 h-1 bg-muted rounded-full overflow-hidden">
+                          <div className="h-full bg-primary/60 rounded-full animate-[pulse_2s_ease-in-out_infinite]" style={{ width: "45%" }} />
+                        </div>
+                        {generationPhase.sectionNames.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            {generationPhase.sectionNames.map((name, i) => (
+                              <span key={i} className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-muted/60 text-muted-foreground">
+                                <span className="h-3.5 w-3.5 rounded-full bg-primary/20 text-primary text-[8px] flex items-center justify-center font-medium">{i + 1}</span>
+                                {name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Phase 3: Processing */}
+                <div className={`flex items-start gap-4 p-4 rounded-xl border transition-all duration-500 ${
+                  generationPhase.phase === "processing"
+                    ? "bg-primary/5 border-primary/30 shadow-sm"
+                    : "bg-muted/20 border-border opacity-40"
+                }`}>
+                  <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-500 ${
+                    generationPhase.phase === "processing"
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground"
+                  }`}>
+                    {generationPhase.phase === "processing" ? (
+                      <Cog className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <Cog className="h-5 w-5" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">Processing Response</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {generationPhase.phase === "processing"
+                        ? "Extracting sections & preparing output..."
+                        : "Waiting..."}
+                    </p>
+                    {generationPhase.phase === "processing" && (
+                      <div className="mt-2 h-1 bg-muted rounded-full overflow-hidden">
+                        <div className="h-full bg-primary/60 rounded-full animate-pulse" style={{ width: "80%" }} />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Current step */}
-              {chainProgress.currentStep > chainProgress.completedSteps.length && (
-                <div className="space-y-2 bg-muted/30 rounded-lg p-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium flex items-center gap-2">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                      Step {chainProgress.currentStep}: {chainProgress.stepName}
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      Processing...
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Completed steps list */}
-              {chainProgress.completedSteps.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="font-medium text-sm">Completed Steps</h3>
-                  <div className="border rounded-lg divide-y">
-                    {chainProgress.completedSteps.map((step, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center gap-3 px-4 py-2.5 text-sm"
-                      >
-                        <div className="h-5 w-5 rounded-full bg-green-500/20 text-green-600 dark:text-green-400 flex items-center justify-center shrink-0">
-                          <Check className="h-3 w-3" />
-                        </div>
-                        <span className="font-medium">Step {i + 1}</span>
-                        <span className="text-muted-foreground truncate">{step.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Subtle animated dots */}
+              <div className="flex justify-center gap-1.5">
+                <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "0ms" }} />
+                <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "150ms" }} />
+                <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "300ms" }} />
+              </div>
             </div>
           </div>
         ) : generatedContent ? (
